@@ -23,7 +23,8 @@
 #define MAX_NESTING 256
 
 int continuous_count(char *p);
-int clear_loop(char *p);
+int check_loops(char *p,int *index,int *mult);
+int global_count;
 
 int main(int argc, char *argv[])
 {
@@ -35,13 +36,15 @@ int main(int argc, char *argv[])
     int pcstack[MAX_NESTING];
     int *top = pcstack, *limit = pcstack + MAX_NESTING;
     int count = 0;
+    int index[1000];
+    int mult[1000];
 
     // Function prologue.
     |  push PTR
     |  mov  PTR, rdi      // rdi store 1st argument
 
     for (char *p = read_file(argv[1]); *p; p++) {
-        switch (*p) {
+	switch (*p) {
             case '>':
                 count = continuous_count(p);
                 p += count - 1;
@@ -76,10 +79,36 @@ int main(int argc, char *argv[])
                 // We store pclabel offsets in a stack to link the loop
                 // begin and end together.
 
-                if(clear_loop(p)){
-                    p += 2;
+                count = check_loops(p, index, mult);
+
+                if(count == 0){
+                    p += global_count;
                     |  mov  byte [PTR], 0
                     break;
+
+                }else if(count > 0){
+                    |  mov  cx, word [PTR]
+                    |  mov  r11, PTR
+                    |  add  PTR, index[0]
+                    |  mov  ax, word mult[0]
+                    |  imul  ax, cx
+                    |  add  byte [PTR], al
+
+                    for(int i = 1; i < count; i++){
+                        |  mov  r9, index[i]
+                        |  sub  r9, index[i - 1]
+                        |  add  PTR, r9
+                        |  mov  ax, mult[i]
+                        |  imul  ax, cx
+                        |  add  byte [PTR], al
+                    }
+
+                    |  mov  PTR, r11
+                    |  mov  byte [PTR], 0
+     
+                    p += global_count;
+                    break;
+
                 }else{
                     maxpc += 2;
                     *top++ = maxpc;
@@ -89,16 +118,16 @@ int main(int argc, char *argv[])
                     |=>(maxpc-1):
                     break;
                 }
-
+                
             case ']':
                 if (top == pcstack) err("Unmatched ']'");
                 top--;
                 |  cmp  byte [PTR], 0
                 |  jne  =>(*top-1)
                 |=>(*top-2):
-                      break;
+                break;
+            }
         }
-    }
 
     // Function epilogue.
     |  pop  PTR
@@ -123,10 +152,28 @@ int continuous_count(char *p)
     return count;
 }
 
-int clear_loop(char *p){
-    if (*(p+1) == '-' && *(p+2) == ']'){
-        return 1;
-    }else{
-        return 0;
-    }
+int check_loops(char *p,int *index,int *mult)
+{
+    int res,offset = 0,_index = 0;
+    global_count = 0;
+    if (*(p+1) != '-') return -1;
+    p += 2;
+    global_count += 2;
+    while (*p != ']') {
+        if (*p == '[' || *p == '-' ||
+            *p == '.' || *p == ',')
+            return -1;
+        res = continuous_count(p);
+        if (*p == '>') offset += res;
+        else if (*p == '<') offset -= res;
+        else if (*p == '+') {
+            index[_index] = offset;
+            mult[_index] = res;
+            _index++;
+        }
+        global_count += res;
+        p += res;
+   }
+   if (offset != 0) return -1;
+   return _index;
 }
