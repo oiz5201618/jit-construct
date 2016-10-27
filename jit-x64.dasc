@@ -23,6 +23,7 @@
 #define MAX_NESTING 256
 
 int continuous_count(char *p);
+int clear_loop(char *p);
 
 int main(int argc, char *argv[])
 {
@@ -74,13 +75,21 @@ int main(int argc, char *argv[])
                 // Each loop gets two pclabels: at the beginning and end.
                 // We store pclabel offsets in a stack to link the loop
                 // begin and end together.
-                maxpc += 2;
-                *top++ = maxpc;
-                dasm_growpc(&state, maxpc);
-                |  cmp  byte [PTR], 0
-                |  je   =>(maxpc-2)
-                |=>(maxpc-1):
-                      break;
+
+                if(clear_loop(p)){
+                    p += 2;
+                    |  mov  byte [PTR], 0
+                    break;
+                }else{
+                    maxpc += 2;
+                    *top++ = maxpc;
+                    dasm_growpc(&state, maxpc);
+                    |  cmp  byte [PTR], 0
+                    |  je   =>(maxpc-2)
+                    |=>(maxpc-1):
+                    break;
+                }
+
             case ']':
                 if (top == pcstack) err("Unmatched ']'");
                 top--;
@@ -112,4 +121,12 @@ int continuous_count(char *p)
         ptr++;
     }
     return count;
+}
+
+int clear_loop(char *p){
+    if (*(p+1) == '-' && *(p+2) == ']'){
+        return 1;
+    }else{
+        return 0;
+    }
 }
